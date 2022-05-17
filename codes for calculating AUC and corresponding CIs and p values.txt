@@ -1,0 +1,410 @@
+/*************************************************************************/
+/* Below SAS codes are written for the following purposes for the paper: */
+/* Polygenic risk score enhances the risk prediction of morbid obesity in*/
+/* adult survivors of childhood cancer  ---- Y. Sapkota et. al.          */
+/* 1. Fitting the main model using polytomous regression and calculating */
+/*    corresponding AUCs                                                 */
+/* 2. Calcuating p values for comparing AUCs from different polytomous   */
+/*    vs. AUC from the reference model using bootstrap                   */
+/* 3. Calculating CIs for each model's AUC using bootstrap               */
+/* Written by Weiyu Qiu (University of Alberta, weiyu@ualberta.ca)       */
+/* on May 13, 2022                                                       */
+/*************************************************************************/
+
+%include "...\MultAUC.sas";
+
+/*fit polytomous regression on SJLIFE European participants*/
+proc logistic data=sj_eur;
+	class obesity(ref='Normal') gender(ref='Female') 
+		  brainrt_cat(ref=first) chestrt_cat(ref=first)
+		  pelvisrt_cat(ref=first) abdrt_cat(ref=first) hpa_cat2(ref=first) 
+		  cortico_dose_5(ref='No') smoker(ref='Never')
+		  SCORE_rare_cat(ref='bottom_decile') SCORE_common_cat(ref='bottom_decile')
+		  /order=internal param=ref;
+	model obesity=gender brainrt_cat chestrt_cat pelvisrt_cat abdrt_cat hpa_cat2
+    	  cortico_dose_5 smoker MET_vigday SCORE_rare_cat SCORE_common_cat
+	      PC1 PC2 PC3 PC4 PC5 PC6 PC7 PC8 PC9 PC10 
+		  age_bmi_cs1 age_bmi_cs2 age_bmi_cs3 age_bmi_cs4/link=glogit cl; 
+	output out=pred1 PREDPROBS=(INDIVIDUAL);
+run;
+
+/*calculate AUC*/
+data prob0;
+	set pred1;
+	where cohort="SJLIFE" and ancestry="EUR";
+	/*make log P(Grade >=5)/P(Grade < 5)*/
+	pa5_1=IP_severe_obese;
+	pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+	out50=(obesity="severe_obese");
+	/*make log P(Grade >=4)/P(Grade < 4)*/
+	pa4_1=IP_severe_obese+IP_obese;
+	pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+	out40=(obesity in ("severe_obese","obese"));
+	/*make log P(Grade >=3)/P(Grade < 3)*/
+	pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+	pa3_0=IP_Normal+IP_Underweight;
+	out30=(obesity in ("severe_obese","obese","Overweight"));
+run;
+%MultAUC(data=prob0, response=out50, prefix=pa5_); 
+
+data auc;
+	set PairAUC(keep=AUC);
+	model=1;
+	cohort='SJLIFE EUR';
+	rename AUC=AUC_mobidobese;
+	id=1;
+run; 
+%MultAUC(data=prob0, response=out40, prefix=pa4_);
+
+data PairAUC;
+	set PairAUC;
+	id=1;
+run;
+
+data auc;
+	merge auc PairAUC(keep=AUC id);
+	by id;
+	rename AUC=AUC_obese;
+run;
+%MultAUC(data=prob0, response=out30, prefix=pa3_);
+
+data PairAUC;
+ 	set PairAUC;
+	id=1;
+run;
+
+data auc;
+	merge auc PairAUC(keep=AUC id);
+	by id;
+	rename AUC=AUC_overweight;
+run;
+
+data auc;
+	retain cohort model id AUC_overweight AUC_obese AUC_morbidobese;
+	set auc;
+run;
+
+proc print data=auc noobs; run;
+
+/*bootstrap for calculating CIs and p values for AUC*/
+data sj_eur;
+	set datgrs;
+	where cohort="SJLIFE" and ancestry="EUR";
+	out=obesity;
+run;
+
+data sj_afr;
+	set datgrs;
+	where cohort="SJLIFE" and ancestry="AFR";
+	out='';
+run;
+
+data ccss_eur;
+	set datgrs;
+	where cohort="CCSS" and ancestry="EUR";
+	out='';
+run;
+
+/*CCSS EUR have none-one weights, make duplicated records for these weights*/
+%macro cpy(dname=,outdat=,val=,i=);
+data &outdat.;
+	set &dname;
+	output;
+	if round(wgt,1)=&val then 
+		do _n_=1 by 1 to &i;
+		output; 
+	end;
+run;
+%mend;
+%cpy(dname=ccss_eur,outdat=_2,val=2,i=1);
+%cpy(dname=_2,outdat=ccss_eur,val=4,i=3);
+
+/*generate ID list for stratified resampling*/
+data id1;
+	set sj_eur;
+	where obesity="Normal";
+	keep sjlid;
+run;
+
+data id2;
+	set sj_eur;
+	where obesity="Overweight";
+	keep sjlid;
+run;
+
+data id3;
+	set sj_eur;
+	where obesity="Underweight";
+	keep sjlid;
+run;
+
+data id4;
+	set sj_eur;
+	where obesity="obese";
+	keep sjlid;
+run;
+
+data id5;
+	set sj_eur;
+	where obesity="severe_obese";
+	keep sjlid;
+run;
+
+libname obese "..."; /*save bootstrap results to a custom folder in case program interrupted in the middle of running*/
+%include "...\GetMultAUC.sas";
+
+%macro BootAUC1000;
+	%let iter=0;
+	%let boot=0;
+	%do %while(&iter<=1000);
+		%if &boot=0 %then %do; /*original data*/
+			data new;
+				set sj_eur sj_afr ccss_eur;
+				by sjlid;
+			run;
+
+			%GetMultAUC;
+			data obese.BootAUC;
+				set auc;
+			run;
+			%let iter=%eval(&iter.+1);
+		%end;
+		%else %do;
+			/*resample by obesity categories*/
+			proc surveyselect data=id1 out=smp1 NOPRINT 
+		    	seed=&boot                                         
+		     	method=urs sampsize=852   /*number of people in "id1"*/              
+		     	outhits;                                 
+			run;
+
+			proc surveyselect data=id2 out=smp2 NOPRINT 
+		    	seed=&boot                                         
+		     	method=urs sampsize=707   /*number of people in "id2"*/              
+		     	outhits;                                 
+			run;
+
+			proc surveyselect data=id3 out=smp3 NOPRINT 
+		    	seed=&boot                                         
+		     	method=urs sampsize=80   /*number of people in "id3"*/              
+		     	outhits;                                 
+			run;
+
+			proc surveyselect data=id4 out=smp4 NOPRINT 
+		    	seed=&boot                                         
+		     	method=urs sampsize=723   /*number of people in "id4"*/              
+		     	outhits;                                 
+			run;
+
+			proc surveyselect data=id5 out=smp5 NOPRINT 
+		    	seed=&boot                                         
+		     	method=urs sampsize=186   /*number of people in "id5"*/              
+		     	outhits;                                 
+			run;
+
+			data smp;	
+				set smp1 smp2 smp3 smp4 smp5;
+			run;
+
+			proc sql noprint;
+		 		create table boot as
+		 		select * from sj_eur a
+		 		join smp b
+		 		on a.sjlid = b.sjlid;
+		 	quit;
+
+			data new;
+				set boot sj_afr ccss_eur;
+				by sjlid;
+			run;
+
+			%GetMultAUC;
+
+			data my_log;
+				infile  "...\AUClog.log" truncover;
+				input a_line $200.;
+				if index(a_line, 'ERROR:') > 0 then output;
+			run; /*if any error occurs, need to take a closer look at the correponding iteration*/
+
+			data _NULL_;
+				if 0 then set my_log nobs=n;
+				call symputx('nrows',n);
+				stop;
+			run;
+
+			%if &nrows=0 %then %do;
+				data obese.BootAUC;
+					set obese.BootAUC auc;
+				run;
+				%let iter=%eval(&iter.+1);
+			%end;
+		%end;
+
+		%let boot=%eval(&boot.+1);
+		%put boot=&boot., iter=&iter.;
+	
+%end; 
+%mend BootAUC1000;
+
+proc printto log='...\BootAUClog.log'; run; /*save log to file in case SAS log screen is full*/
+
+%BootAUC1000;
+
+proc printto ; run; 
+
+/*get auc from the clinical model only as the reference model to calculate p value*/
+%macro splitdata(out=,cond=);
+	%do i=1 %to 9;
+		%let j=%eval(&i.-1);
+		data &out.&j.;
+			set obese.bootauc;
+			where model=&i. and cohort="SJLIFE EUR" and iter^=0;
+			rename auc_morbidobese=auc5_&out.&j. auc_obese=auc4_&out.&j. auc_overweight=auc3_&out.&j.;
+			drop model cohort id;
+		run;
+	%end;
+%mend;
+
+%splitdata(out=sjeur,cond=%str(SJLIFE EUR));
+%splitdata(out=sjafr,cond=%str(SJLIFE AFR));
+%splitdata(out=ccsseur,cond=%str(CCSS EUR));
+
+OPTIONS MERGENOBY= WARN;
+data myauc;
+	merge sjeur0 sjeur1 sjeur2 sjeur3 sjeur4 sjeur5 sjeur6 sjeur7 sjeur8
+		  sjafr0 sjafr1 sjafr2 sjafr3 sjafr4 sjafr5 sjafr6 sjafr7 sjafr8
+		  ccsseur0 ccsseur1 ccsseur2 ccsseur3 ccsseur4 ccsseur5 ccsseur6 ccsseur7 ccsseur8;
+	by iter;
+	array auc_0(9) auc5_sjeur0 auc5_sjafr0 auc5_ccsseur0 auc4_sjeur0 auc4_sjafr0 auc4_ccsseur0 auc3_sjeur0 auc3_sjafr0 auc3_ccsseur0;
+	array auc_1(9) auc5_sjeur1 auc5_sjafr1 auc5_ccsseur1 auc4_sjeur1 auc4_sjafr1 auc4_ccsseur1 auc3_sjeur1 auc3_sjafr1 auc3_ccsseur1;
+	array auc_2(9) auc5_sjeur2 auc5_sjafr2 auc5_ccsseur2 auc4_sjeur2 auc4_sjafr2 auc4_ccsseur2 auc3_sjeur2 auc3_sjafr2 auc3_ccsseur2;
+	array auc_3(9) auc5_sjeur3 auc5_sjafr3 auc5_ccsseur3 auc4_sjeur3 auc4_sjafr3 auc4_ccsseur3 auc3_sjeur3 auc3_sjafr3 auc3_ccsseur3;
+	array auc_4(9) auc5_sjeur4 auc5_sjafr4 auc5_ccsseur4 auc4_sjeur4 auc4_sjafr4 auc4_ccsseur4 auc3_sjeur4 auc3_sjafr4 auc3_ccsseur4;
+	array auc_5(9) auc5_sjeur5 auc5_sjafr5 auc5_ccsseur5 auc4_sjeur5 auc4_sjafr5 auc4_ccsseur5 auc3_sjeur5 auc3_sjafr5 auc3_ccsseur5;
+	array auc_6(9) auc5_sjeur6 auc5_sjafr6 auc5_ccsseur6 auc4_sjeur6 auc4_sjafr6 auc4_ccsseur6 auc3_sjeur6 auc3_sjafr6 auc3_ccsseur6;
+	array auc_7(9) auc5_sjeur7 auc5_sjafr7 auc5_ccsseur7 auc4_sjeur7 auc4_sjafr7 auc4_ccsseur7 auc3_sjeur7 auc3_sjafr7 auc3_ccsseur7;
+	array auc_8(9) auc5_sjeur8 auc5_sjafr8 auc5_ccsseur8 auc4_sjeur8 auc4_sjafr8 auc4_ccsseur8 auc3_sjeur8 auc3_sjafr8 auc3_ccsseur8;
+
+	array diff_10(9) diff_auc5_sjeur10 diff_auc5_sjafr10 diff_auc5_ccsseur10
+					 diff_auc4_sjeur10 diff_auc4_sjafr10 diff_auc4_ccsseur10
+					 diff_auc3_sjeur10 diff_auc3_sjafr10 diff_auc3_ccsseur10;
+	array diff_20(9) diff_auc5_sjeur20 diff_auc5_sjafr20 diff_auc5_ccsseur20
+					 diff_auc4_sjeur20 diff_auc4_sjafr20 diff_auc4_ccsseur20
+					 diff_auc3_sjeur20 diff_auc3_sjafr20 diff_auc3_ccsseur20;
+	array diff_30(9) diff_auc5_sjeur30 diff_auc5_sjafr30 diff_auc5_ccsseur30
+					 diff_auc4_sjeur30 diff_auc4_sjafr30 diff_auc4_ccsseur30
+					 diff_auc3_sjeur30 diff_auc3_sjafr30 diff_auc3_ccsseur30;
+	array diff_40(9) diff_auc5_sjeur40 diff_auc5_sjafr40 diff_auc5_ccsseur40
+					 diff_auc4_sjeur40 diff_auc4_sjafr40 diff_auc4_ccsseur40
+					 diff_auc3_sjeur40 diff_auc3_sjafr40 diff_auc3_ccsseur40;
+	array diff_50(9) diff_auc5_sjeur50 diff_auc5_sjafr50 diff_auc5_ccsseur50
+					 diff_auc4_sjeur50 diff_auc4_sjafr50 diff_auc4_ccsseur50
+					 diff_auc3_sjeur50 diff_auc3_sjafr50 diff_auc3_ccsseur50;
+	array diff_60(9) diff_auc5_sjeur60 diff_auc5_sjafr60 diff_auc5_ccsseur60
+					 diff_auc4_sjeur60 diff_auc4_sjafr60 diff_auc4_ccsseur60
+					 diff_auc3_sjeur60 diff_auc3_sjafr60 diff_auc3_ccsseur60;
+	array diff_70(9) diff_auc5_sjeur70 diff_auc5_sjafr70 diff_auc5_ccsseur70
+					 diff_auc4_sjeur70 diff_auc4_sjafr70 diff_auc4_ccsseur70
+					 diff_auc3_sjeur70 diff_auc3_sjafr70 diff_auc3_ccsseur70;
+	array diff_80(9) diff_auc5_sjeur80 diff_auc5_sjafr80 diff_auc5_ccsseur80
+					 diff_auc4_sjeur80 diff_auc4_sjafr80 diff_auc4_ccsseur80
+					 diff_auc3_sjeur80 diff_auc3_sjafr80 diff_auc3_ccsseur80;
+	do i=1 to 9;
+		diff_10(i)=auc_1(i)-auc_0(i);
+		diff_20(i)=auc_2(i)-auc_0(i);
+		diff_30(i)=auc_3(i)-auc_0(i);
+		diff_40(i)=auc_4(i)-auc_0(i);
+		diff_50(i)=auc_5(i)-auc_0(i);
+		diff_60(i)=auc_6(i)-auc_0(i);
+		diff_70(i)=auc_7(i)-auc_0(i);
+		diff_80(i)=auc_8(i)-auc_0(i);
+	end;
+run;
+
+%macro GetPval;
+%let string=%str(auc5_sjeur10 auc5_sjafr10 auc5_ccsseur10 auc4_sjeur10 auc4_sjafr10 auc4_ccsseur10 auc3_sjeur10 auc3_sjafr10 auc3_ccsseur10
+				 auc5_sjeur20 auc5_sjafr20 auc5_ccsseur20 auc4_sjeur20 auc4_sjafr20 auc4_ccsseur20 auc3_sjeur20 auc3_sjafr20 auc3_ccsseur20
+				 auc5_sjeur30 auc5_sjafr30 auc5_ccsseur30 auc4_sjeur30 auc4_sjafr30 auc4_ccsseur30 auc3_sjeur30 auc3_sjafr30 auc3_ccsseur30
+			     auc5_sjeur40 auc5_sjafr40 auc5_ccsseur40 auc4_sjeur40 auc4_sjafr40 auc4_ccsseur40 auc3_sjeur40 auc3_sjafr40 auc3_ccsseur40
+				 auc5_sjeur50 auc5_sjafr50 auc5_ccsseur50 auc4_sjeur50 auc4_sjafr50 auc4_ccsseur50 auc3_sjeur50 auc3_sjafr50 auc3_ccsseur50
+				 auc5_sjeur60 auc5_sjafr60 auc5_ccsseur60 auc4_sjeur60 auc4_sjafr60 auc4_ccsseur60 auc3_sjeur60 auc3_sjafr60 auc3_ccsseur60
+				 auc5_sjeur70 auc5_sjafr70 auc5_ccsseur70 auc4_sjeur70 auc4_sjafr70 auc4_ccsseur70 auc3_sjeur70 auc3_sjafr70 auc3_ccsseur70
+				 auc5_sjeur80 auc5_sjafr80 auc5_ccsseur80 auc4_sjeur80 auc4_sjafr80 auc4_ccsseur80 auc3_sjeur80 auc3_sjafr80 auc3_ccsseur80);
+%let i=1;
+%let var=%scan(&string,&i.);
+%do %while (&var ^= );
+		
+	proc sql; 
+		create table tmp as 
+		select count(diff_&var.) as count from myauc(where=(diff_&var.<=0));
+	quit;
+
+	data tmp; 
+		length model $ 20;
+		set tmp; 
+		p=count/1000*2; 
+		model="&var.";
+	run;
+
+	%if &i.=1 %then %do;
+		data pval;
+			set tmp;
+		run;
+	%end;
+
+	%else %do;
+		data pval;
+			set pval tmp;
+		run;
+	%end;
+
+	%let i=%eval(&i.+1);
+	%let var=%scan(&string.,&i.);
+%end;
+%mend;
+%GetPval;
+
+/*get p value for comparing AUC from current model with AUC from the reference model (clinical+lifestyle variables only)*/
+data pval;
+	set pval;
+	format p pvalue6.3;
+run;
+
+proc sort data=pval; by model; run;
+
+/*get CI for AUC*/
+%macro GetCI;
+	%do idx=3 %to 5;
+		proc univariate data=obese.bootauc(where=(iter^=0)) noprint;
+			where iter^=0;
+			class cohort model; 
+			var auc&idx.; 
+			output out=AUC_CI pctlpre=P_ pctlpts= 2.5 97.5; 
+		run;
+
+		data tmp;
+			set auc_ci;
+			_level_="&idx.";
+			ci="("||strip(put(P_2_5,8.2))||"-"||strip(put(P_97_5,8.2))||")";
+			drop P_2_5 P_97_5;
+		run;
+
+		%if &idx=3 %then %do;
+			data ci;
+				set tmp;
+			run;
+		%end;
+
+		%else %do;
+			data ci;
+				set ci tmp;
+			run;
+		%end;
+	%end;
+	
+%mend;
+
+%GetCI;
+
+proc sort data=ci; by cohort _level_ model; run;
+
+

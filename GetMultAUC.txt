@@ -1,0 +1,1671 @@
+/*************************************************************************************/
+/* Below macro is for calculating AUCs from each model for the purpose of the paper: */
+/* Polygenic risk score enhances the risk prediction of morbid obesity in adult      */
+/* survivors of childhood cancer   ---- Y. Sapkota et. al.                           */
+/* Written by Weiyu Qiu (University of Alberta, weiyu@ualberta.ca) on May 13, 2022   */
+/*************************************************************************************/
+
+%include "...\MultAUC.sas"; /*this is a macro written by SAS, downloadable from https://support.sas.com/kb/64/029.html*/
+
+%macro GetMultAUC;
+
+	/*delete pre-existing log file*/
+	filename fname "...\AUClog.log";
+	data _null_;
+	rc=fdelete('fname');
+	put rc=;
+	run;
+
+	/*save log file for the current iteration*/
+	proc printto log='...\AUClog.log'; 
+	run;
+
+	/*clinical + lifestyle variable only*/
+	proc logistic data=new noprint;  
+		class out(ref='Normal') gender(ref='Female') 
+			  brainrt_cat(ref=first) chestrt_cat(ref=first)
+			  pelvisrt_cat(ref=first) abdrt_cat(ref=first) hpa_cat2(ref=first) 
+			  cortico_dose_5(ref='No') smoker(ref='Never') 
+			  /order=internal param=ref;
+		model out=gender brainrt_cat chestrt_cat pelvisrt_cat abdrt_cat hpa_cat2
+        	  cortico_dose_5 smoker MET_vigday 
+			  PC1 PC2 PC3 PC4 PC5 PC6 PC7 PC8 PC9 PC10 
+			  age_bmi_cs1 age_bmi_cs2 age_bmi_cs3 age_bmi_cs4
+			  /link=glogit; 
+		output out=pred1 PREDPROBS=(INDIVIDUAL);
+	run;
+
+	/*calculate AUC*/
+	/*training data: SJLIFE EUR*/
+	data prob0;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob0, response=out50, prefix=pa5_); 
+
+	data auc;
+		set PairAUC(keep=AUC);
+		model=1;
+		cohort='SJLIFE EUR';
+		rename AUC=AUC_morbidobese;
+		id=1;
+	run; 
+	%MultAUC(data=prob0, response=out40, prefix=pa4_);
+
+	data PairAUC;
+		set PairAUC;
+		id=1;
+	run;
+
+	data auc;
+		merge auc PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob0, response=out30, prefix=pa3_);
+
+	data PairAUC;
+		set PairAUC;
+		id=1;
+	run;
+	data auc;
+		merge auc PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	/*test data: SJLIFE AFR*/
+	data prob1;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="AFR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob1, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=1;
+		cohort='SJLIFE AFR';
+		rename AUC=AUC_morbidobese;
+		id=2;
+	run; 
+	%MultAUC(data=prob1, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=2;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob1, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=2;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: CCSS EUR*/
+	data prob2;
+	 	set pred1;
+		where cohort="CCSS" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob2, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=1;
+		cohort='CCSS EUR';
+		rename AUC=AUC_morbidobese;
+		id=3;
+	run; 
+	%MultAUC(data=prob2, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=3;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob2, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=3;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*2. + rare*/
+	proc logistic data=new noprint;  
+		class out(ref='Normal') gender(ref='Female') 
+		      brainrt_cat(ref=first) chestrt_cat(ref=first)
+			  pelvisrt_cat(ref=first) abdrt_cat(ref=first) hpa_cat2(ref=first) 
+			  cortico_dose_5(ref='No') smoker(ref='Never') 
+			  SCORE_rare_cat(ref='bottom_decile')
+			  /order=internal param=ref;
+		model out=gender brainrt_cat chestrt_cat pelvisrt_cat abdrt_cat hpa_cat2
+           		  cortico_dose_5 smoker MET_vigday SCORE_rare_cat
+				  PC1 PC2 PC3 PC4 PC5 PC6 PC7 PC8 PC9 PC10 
+				  age_bmi_cs1 age_bmi_cs2 age_bmi_cs3 age_bmi_cs4
+				  /link=glogit; 
+		output out=pred1 PREDPROBS=(INDIVIDUAL);
+	run;
+
+	/*calculate AUC*/
+	/*training data: SJLIFE EUR*/
+	data prob0;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob0, response=out50, prefix=pa5_); 
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=2;
+		cohort='SJLIFE EUR';
+		rename AUC=AUC_morbidobese;
+		id=4;
+	run; 
+	%MultAUC(data=prob0, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=4;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob0, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=4;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: SJLIFE AFR*/
+	data prob1;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="AFR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob1, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=2;
+		cohort='SJLIFE AFR';
+		rename AUC=AUC_morbidobese;
+		id=5;
+	run; 
+	%MultAUC(data=prob1, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=5;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+
+	%MultAUC(data=prob1, response=out30, prefix=pa3_);
+	data PairAUC;
+	 	set PairAUC;
+		id=5;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: CCSS EUR*/
+	data prob2;
+	 	set pred1;
+		where cohort="CCSS" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob2, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=2;
+		cohort='CCSS EUR';
+		rename AUC=AUC_morbidobese;
+		id=6;
+	run; 
+	%MultAUC(data=prob2, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=6;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob2, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=6;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*3. + common*/
+	proc logistic data=new noprint;  
+		class out(ref='Normal') gender(ref='Female') 
+			  brainrt_cat(ref=first) chestrt_cat(ref=first)
+			  pelvisrt_cat(ref=first) abdrt_cat(ref=first) hpa_cat2(ref=first) 
+		      cortico_dose_5(ref='No') smoker(ref='Never') 
+			  SCORE_common_cat(ref='bottom_decile')
+			  /order=internal param=ref;
+		model out=gender brainrt_cat chestrt_cat pelvisrt_cat abdrt_cat hpa_cat2
+           		  cortico_dose_5 smoker MET_vigday SCORE_common_cat
+				  PC1 PC2 PC3 PC4 PC5 PC6 PC7 PC8 PC9 PC10 
+				  age_bmi_cs1 age_bmi_cs2 age_bmi_cs3 age_bmi_cs4
+				  /link=glogit; 
+		output out=pred1 PREDPROBS=(INDIVIDUAL);
+	run;
+
+	/*calculate AUC*/
+	/*training data: SJLIFE EUR*/
+	data prob0;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob0, response=out50, prefix=pa5_); 
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=3;
+		cohort='SJLIFE EUR';
+		rename AUC=AUC_morbidobese;
+		id=7;
+	run; 
+	%MultAUC(data=prob0, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=7;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob0, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=7;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: SJLIFE AFR*/
+	data prob1;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="AFR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob1, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=3;
+		cohort='SJLIFE AFR';
+		rename AUC=AUC_morbidobese;
+		id=8;
+	run; 
+	%MultAUC(data=prob1, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=8;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob1, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=8;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: CCSS EUR*/
+	data prob2;
+	 	set pred1;
+		where cohort="CCSS" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob2, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=3;
+		cohort='CCSS EUR';
+		rename AUC=AUC_morbidobese;
+		id=9;
+	run; 
+	%MultAUC(data=prob2, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=9;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob2, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=9;
+	 run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*4. + rare + common*/
+	proc logistic data=new noprint;  
+		class out(ref='Normal') gender(ref='Female') 
+			  brainrt_cat(ref=first) chestrt_cat(ref=first)
+			  pelvisrt_cat(ref=first) abdrt_cat(ref=first) hpa_cat2(ref=first) 
+		      cortico_dose_5(ref='No') smoker(ref='Never') 
+			  SCORE_rare_cat(ref='bottom_decile') SCORE_common_cat(ref='bottom_decile')
+			  /order=internal param=ref;
+		model out=gender brainrt_cat chestrt_cat pelvisrt_cat abdrt_cat hpa_cat2
+       			  cortico_dose_5 smoker MET_vigday SCORE_rare_cat SCORE_common_cat 
+				  PC1 PC2 PC3 PC4 PC5 PC6 PC7 PC8 PC9 PC10 
+			  	  age_bmi_cs1 age_bmi_cs2 age_bmi_cs3 age_bmi_cs4
+			  	  /link=glogit; 
+		output out=pred2 PREDPROBS=(INDIVIDUAL);
+	run;
+
+	/*calculate AUC*/
+	/*training data: SJLIFE EUR*/
+	data prob0;
+	 	set pred2;
+		where cohort="SJLIFE" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob0, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=4;
+		cohort='SJLIFE EUR';
+		rename AUC=AUC_morbidobese;
+		id=10;
+	run; 
+	%MultAUC(data=prob0, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=10;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob0, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=10;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: SJLIFE AFR*/
+	data prob1;
+	 	set pred2;
+		where cohort="SJLIFE" and ancestry="AFR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob1, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=4;
+		cohort='SJLIFE AFR';
+		rename AUC=AUC_morbidobese;
+		id=11;
+	run; 
+	%MultAUC(data=prob1, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=11;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob1, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=11;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: CCSS EUR*/
+	data prob2;
+	 	set pred2;
+		where cohort="CCSS" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob2, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=4;
+		cohort='CCSS EUR';
+		rename AUC=AUC_morbidobese;
+		id=12;
+	run; 
+	%MultAUC(data=prob2, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=12;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob2, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=12;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*5. + rare + common + whr*/
+	proc logistic data=new noprint;  
+		class out(ref='Normal') gender(ref='Female') 
+			  brainrt_cat(ref=first) chestrt_cat(ref=first)
+			  pelvisrt_cat(ref=first) abdrt_cat(ref=first) hpa_cat2(ref=first) 
+		      cortico_dose_5(ref='No') smoker(ref='Never') 
+			  SCORE_rare_cat(ref='bottom_decile')
+			  SCORE_common_cat(ref='bottom_decile')
+			  SCORE_whr_cat(ref='bottom_decile')
+			  /order=internal param=ref;
+		model out=gender brainrt_cat chestrt_cat pelvisrt_cat abdrt_cat hpa_cat2
+           		  cortico_dose_5 smoker MET_vigday SCORE_rare_cat SCORE_common_cat SCORE_whr_cat
+				  PC1 PC2 PC3 PC4 PC5 PC6 PC7 PC8 PC9 PC10 
+				  age_bmi_cs1 age_bmi_cs2 age_bmi_cs3 age_bmi_cs4
+				  /link=glogit; 
+		output out=pred1 PREDPROBS=(INDIVIDUAL);
+	run;
+
+	/*calcuate AUC*/
+	/*training data: SJLIFE EUR*/
+	data prob0;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob0, response=out50, prefix=pa5_); 
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=5;
+		cohort='SJLIFE EUR';
+		rename AUC=AUC_morbidobese;
+		id=13;
+	run; 
+	%MultAUC(data=prob0, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=13;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+
+	%MultAUC(data=prob0, response=out30, prefix=pa3_);
+	data PairAUC;
+	 	set PairAUC;
+		id=13;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: SJLIFE AFR*/
+	data prob1;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="AFR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob1, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=5;
+		cohort='SJLIFE AFR';
+		rename AUC=AUC_morbidobese;
+		id=14;
+	run; 
+	%MultAUC(data=prob1, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=14;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob1, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=14;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: CCSS EUR*/
+	data prob2;
+	 	set pred1;
+		where cohort="CCSS" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob2, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=5;
+		cohort='CCSS EUR';
+		rename AUC=AUC_morbidobese;
+		id=15;
+	run; 
+	%MultAUC(data=prob2, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=15;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob2, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=15;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*6. + rare + common + childhood bmi*/
+	proc logistic data=new noprint;  
+		class out(ref='Normal') gender(ref='Female') 
+			  brainrt_cat(ref=first) chestrt_cat(ref=first)
+			  pelvisrt_cat(ref=first) abdrt_cat(ref=first) hpa_cat2(ref=first) 
+		      cortico_dose_5(ref='No') smoker(ref='Never') 
+			  SCORE_rare_cat(ref='bottom_decile')
+			  SCORE_common_cat(ref='bottom_decile')
+			  SCORE_childhood_obesity_cat(ref='bottom_decile')
+			  /order=internal param=ref;
+		model out=gender brainrt_cat chestrt_cat pelvisrt_cat abdrt_cat hpa_cat2
+          		  cortico_dose_5 smoker MET_vigday SCORE_rare_cat SCORE_common_cat SCORE_childhood_obesity_cat
+				  PC1 PC2 PC3 PC4 PC5 PC6 PC7 PC8 PC9 PC10 
+				  age_bmi_cs1 age_bmi_cs2 age_bmi_cs3 age_bmi_cs4
+				  /link=glogit; 
+		output out=pred1 PREDPROBS=(INDIVIDUAL);
+	run;
+
+	/*calculate AUC*/
+	/*training data: SJLIFE EUR*/
+	data prob0;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob0, response=out50, prefix=pa5_); 
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=6;
+		cohort='SJLIFE EUR';
+		rename AUC=AUC_morbidobese;
+		id=16;
+	run; 
+	%MultAUC(data=prob0, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=16;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob0, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=16;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: SJLIFE AFR*/
+	data prob1;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="AFR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob1, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=6;
+		cohort='SJLIFE AFR';
+		rename AUC=AUC_morbidobese;
+		id=17;
+	run; 
+
+	%MultAUC(data=prob1, response=out40, prefix=pa4_);
+	data PairAUC;
+	 	set PairAUC;
+		id=17;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob1, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=17;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: CCSS EUR*/
+	data prob2;
+	 	set pred1;
+		where cohort="CCSS" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob2, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=6;
+		cohort='CCSS EUR';
+		rename AUC=AUC_morbidobese;
+		id=18;
+	run; 
+	%MultAUC(data=prob2, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=18;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob2, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=18;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*7. + rare + common + childhood obesity*/
+	proc logistic data=new noprint;  
+		class out(ref='Normal') gender(ref='Female') 
+			  brainrt_cat(ref=first) chestrt_cat(ref=first)
+			  pelvisrt_cat(ref=first) abdrt_cat(ref=first) hpa_cat2(ref=first) 
+		      cortico_dose_5(ref='No') smoker(ref='Never') 
+			  SCORE_rare_cat(ref='bottom_decile')
+			  SCORE_common_cat(ref='bottom_decile')
+			  SCORE_childhood_obesity_2_cat(ref='bottom_decile')
+			  /order=internal param=ref;
+		model out=gender brainrt_cat chestrt_cat pelvisrt_cat abdrt_cat hpa_cat2
+           		  cortico_dose_5 smoker MET_vigday SCORE_rare_cat SCORE_common_cat SCORE_childhood_obesity_2_cat
+				  PC1 PC2 PC3 PC4 PC5 PC6 PC7 PC8 PC9 PC10 
+				  age_bmi_cs1 age_bmi_cs2 age_bmi_cs3 age_bmi_cs4
+				  /link=glogit; 
+		output out=pred1 PREDPROBS=(INDIVIDUAL);
+	run;
+
+	/*calculate AUC*/
+	/*training data: SJLIFE EUR*/
+	data prob0;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob0, response=out50, prefix=pa5_); 
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=7;
+		cohort='SJLIFE EUR';
+		rename AUC=AUC_morbidobese;
+		id=19;
+	run; 
+	%MultAUC(data=prob0, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=19;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob0, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=19;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: SJLIFE AFR*/
+	data prob1;
+	 	set pred1;
+		where cohort="SJLIFE" and ancestry="AFR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob1, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=7;
+		cohort='SJLIFE AFR';
+		rename AUC=AUC_morbidobese;
+		id=20;
+	run; 
+	%MultAUC(data=prob1, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=20;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob1, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=20;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: CCSS EUR*/
+	data prob2;
+	 	set pred1;
+		where cohort="CCSS" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob2, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=7;
+		cohort='CCSS EUR';
+		rename AUC=AUC_morbidobese;
+		id=21;
+	run; 
+	%MultAUC(data=prob2, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=21;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob2, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=21;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*8. + rare + latest*/
+	proc logistic data=new noprint;  
+		class out(ref='Normal') gender(ref='Female') 
+			  brainrt_cat(ref=first) chestrt_cat(ref=first)
+			  pelvisrt_cat(ref=first) abdrt_cat(ref=first) hpa_cat2(ref=first) 
+		      cortico_dose_5(ref='No') smoker(ref='Never') 
+			  SCORE_rare_cat(ref='bottom_decile') SCORE_latest_cat(ref='bottom_decile')
+		      /order=internal param=ref;
+		model out=gender brainrt_cat chestrt_cat pelvisrt_cat abdrt_cat hpa_cat2
+           		  cortico_dose_5 smoker MET_vigday SCORE_rare_cat SCORE_latest_cat
+				  PC1 PC2 PC3 PC4 PC5 PC6 PC7 PC8 PC9 PC10 
+				  age_bmi_cs1 age_bmi_cs2 age_bmi_cs3 age_bmi_cs4
+				  /link=glogit; 
+		output out=pred3 PREDPROBS=(INDIVIDUAL);
+	run;
+
+	/*calculate AUC*/
+	/*training data: SJLIFE EUR*/
+	data prob0;
+	 	set pred3;
+		where cohort="SJLIFE" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob0, response=out50, prefix=pa5_); 
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=8;
+		cohort='SJLIFE EUR';
+		rename AUC=AUC_morbidobese;
+		id=22;
+	run; 
+	%MultAUC(data=prob0, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=22;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob0, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=22;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+		iter=&iter.;
+	run;
+
+	/*test data: SJLIFE AFR*/
+	data prob1;
+	 	set pred3;
+		where cohort="SJLIFE" and ancestry="AFR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob1, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=8;
+		cohort='SJLIFE AFR';
+		rename AUC=AUC_morbidobese;
+		id=23;
+	run; 
+	%MultAUC(data=prob1, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=23;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob1, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=23;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: CCSS EUR*/
+	data prob2;
+	 	set pred3;
+		where cohort="CCSS" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob2, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=8;
+		cohort='CCSS EUR';
+		rename AUC=AUC_morbidobese;
+		id=24;
+	run; 
+	%MultAUC(data=prob2, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=24;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob2, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=24;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*9. + rare + common + whr + childhood BMI + childhood obesity*/
+	proc logistic data=new noprint;  
+		class out(ref='Normal') gender(ref='Female') 
+			  brainrt_cat(ref=first) chestrt_cat(ref=first)
+			  pelvisrt_cat(ref=first) abdrt_cat(ref=first) hpa_cat2(ref=first) 
+		      cortico_dose_5(ref='No') smoker(ref='Never') 
+			  SCORE_rare_cat(ref='bottom_decile') SCORE_common_cat(ref='bottom_decile') 
+			  SCORE_whr_cat(ref='bottom_decile')
+			  SCORE_childhood_obesity_cat(ref='bottom_decile')
+			  SCORE_childhood_obesity_2_cat(ref='bottom_decile')
+		      /order=internal param=ref;
+		model out=gender brainrt_cat chestrt_cat pelvisrt_cat abdrt_cat hpa_cat2
+           		  cortico_dose_5 smoker MET_vigday SCORE_rare_cat SCORE_common_cat SCORE_whr_cat
+				  SCORE_childhood_obesity_cat SCORE_childhood_obesity_2_cat
+				  PC1 PC2 PC3 PC4 PC5 PC6 PC7 PC8 PC9 PC10 
+				  age_bmi_cs1 age_bmi_cs2 age_bmi_cs3 age_bmi_cs4
+				  /link=glogit; 
+		output out=pred3 PREDPROBS=(INDIVIDUAL);
+	run;
+
+	/*calculate AUC*/
+	/*training data: SJLIFE EUR*/
+	data prob0;
+	 	set pred3;
+		where cohort="SJLIFE" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob0, response=out50, prefix=pa5_); 
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=9;
+		cohort='SJLIFE EUR';
+		rename AUC=AUC_morbidobese;
+		id=25;
+	run; 
+	%MultAUC(data=prob0, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=25;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob0, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=25;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: SJLIFE AFR*/
+	data prob1;
+	 	set pred3;
+		where cohort="SJLIFE" and ancestry="AFR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob1, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=9;
+		cohort='SJLIFE AFR';
+		rename AUC=AUC_morbidobese;
+		id=26;
+	run; 
+	%MultAUC(data=prob1, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=26;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob1, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=26;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+	run;
+
+	/*test data: CCSS EUR*/
+	data prob2;
+	 	set pred3;
+		where cohort="CCSS" and ancestry="EUR";
+		/*make log P(Grade >=5)/P(Grade < 5)*/
+		pa5_1=IP_severe_obese;
+		pa5_0=IP_obese+IP_Overweight+IP_Normal+IP_Underweight;
+		out50=(obesity="severe_obese");
+		/*make log P(Grade >=4)/P(Grade < 4)*/
+		pa4_1=IP_severe_obese+IP_obese;
+		pa4_0=IP_Overweight+IP_Normal+IP_Underweight;
+		out40=(obesity in ("severe_obese","obese"));
+		/*make log P(Grade >=3)/P(Grade < 3)*/
+		pa3_1=IP_severe_obese+IP_obese+IP_Overweight;
+		pa3_0=IP_Normal+IP_Underweight;
+		out30=(obesity in ("severe_obese","obese","Overweight"));
+	run;
+	%MultAUC(data=prob2, response=out50, prefix=pa5_);
+
+	data tmp;
+		set PairAUC(keep=AUC);
+		model=9;
+		cohort='CCSS EUR';
+		rename AUC=AUC_morbidobese;
+		id=27;
+	run; 
+	%MultAUC(data=prob2, response=out40, prefix=pa4_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=27;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_obese;
+	run;
+	%MultAUC(data=prob2, response=out30, prefix=pa3_);
+
+	data PairAUC;
+	 	set PairAUC;
+		id=27;
+	run;
+
+	data tmp;
+		merge tmp PairAUC(keep=AUC id);
+		by id;
+		rename AUC=AUC_overweight;
+	run;
+
+	data auc;
+		set auc tmp;
+		iter=&iter.;
+		seed=&boot.;
+	run;
+
+proc printto ; run; 
+
+%mend GetMultAUC;
+
